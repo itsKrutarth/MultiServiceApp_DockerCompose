@@ -38,7 +38,8 @@ services:
       ME_CONFIG_BASICAUTH_ENABLED: true
       ME_CONFIG_BASICAUTH_USERNAME: admin
       ME_CONFIG_BASICAUTH_PASSWORD: admin
-
+    networks:
+      - public
 
   backend:
     image: golang:1.26
