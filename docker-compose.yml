@@ -53,7 +53,7 @@ services:
     networks: 
       - public
     depends_on:
-      postgres:
+      mongodb:
         condition: service_healthy
     volumes: 
       - ./backend:/app
