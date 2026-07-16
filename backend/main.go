@@ -1,35 +1,39 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
-	_ "github.com/lib/pq"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var db *sql.DB
+var collection *mongo.Collection
+var ctx = context.Background()
 
 type Note struct {
-	ID   int    `json:"id"`
-	Text string `json:"text"`
+	ID   string `json:"id,omitempty" bson:"_id,omitempty"`
+	Text string `json:"text" bson:"text"`
 }
 
 func getNotes(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, text FROM notes ORDER BY id")
+	cursor, err := collection.Find(ctx, bson.M{})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	defer rows.Close()
+	defer cursor.Close(ctx)
 
 	notes := []Note{}
-	for rows.Next() {
+	for cursor.Next(ctx) {
 		var n Note
-		rows.Scan(&n.ID, &n.Text)
+		cursor.Decode(&n)
 		notes = append(notes, n)
 	}
 
@@ -42,7 +46,8 @@ func addNote(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	var n Note
 	json.NewDecoder(r.Body).Decode(&n)
-	_, err := db.Exec("INSERT INTO notes (text) VALUES ($1)", n.Text)
+
+	_, err := collection.InsertOne(ctx, bson.M{"text": n.Text})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -65,19 +70,25 @@ func handleNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+	uri := fmt.Sprintf(
+		"mongodb://%s:%s@%s:%s/",
+		os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"),
 		os.Getenv("DB_HOST"), os.Getenv("DB_PORT"),
-		os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"),
 	)
 
-	var err error
-	db, err = sql.Open("postgres", connStr)
+	clientOpts := options.Client().ApplyURI(uri)
+	client, err := mongo.Connect(ctx, clientOpts)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("mongo connect failed:", err)
 	}
 
-	db.Exec(`CREATE TABLE IF NOT EXISTS notes (id SERIAL PRIMARY KEY, text TEXT)`)
+	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := client.Ping(pingCtx, nil); err != nil {
+		log.Fatal("mongo ping failed:", err)
+	}
+
+	collection = client.Database(os.Getenv("DB_NAME")).Collection("notes")
 
 	http.HandleFunc("/notes", handleNotes)
 	log.Println("backend running on :8080")

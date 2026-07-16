@@ -6,40 +6,59 @@ services:
     image: nginx:alpine
     ports: ["8000:80"]
     depends_on: [backend]
+    networks:
+      - public
     volumes: 
-      - ./frontend:/var/www/html
+      - ./frontend:/usr/share/nginx/html
 
 
-  postgres:
-    image: postgres:18.4
-    ports: ["5432:5432"]
+  mongodb:
+    image: mongo
+    ports: ["27017:27017"]
     environment:
-      POSTGRES_PASSWORD: 1234
-      POSTGRES_USER: user
-      POSTGRES_DB: mydb
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+      MONGO_DB: mydb
+    networks:
+      - public
     volumes: 
-      - ./db:/var/lib/postgresql/data
+      - ./db:/data/db
     healthcheck:
-        test: ["CMD-SHELL","pg_isready -U user -d mydb"]
+        test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping').ok", "--quiet"]
         interval: 5s
         timeout: 5s
         retries: 5
 
+  mongo-express:
+    image: mongo-express
+    ports:
+      - 8081:8081
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://root:root@mongodb:27017/
+      ME_CONFIG_BASICAUTH_ENABLED: true
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
 
 
   backend:
     image: golang:1.26
     ports: ["8080:8080"]
     environment:
-      DB_HOST: postgres
+      DB_HOST: mongodb
       DB_NAME: mydb
-      DB_PORT: 5432
-      DB_USER: user
-      DB_PASSWORD: 1234
+      DB_PORT: 27017
+      DB_USER: root
+      DB_PASSWORD: root
     working_dir: /app
+    networks: 
+      - public
     depends_on:
       postgres:
         condition: service_healthy
     volumes: 
       - ./backend:/app
-    command: sh -c "go mod download && go run main.go"
+    command: sh -c "go mod tidy && go run main.go"
+
+networks:
+  public:
+    driver: bridge
